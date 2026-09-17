@@ -1,0 +1,384 @@
+I’ll compare them at four boundaries: the training example, the Transformer architecture, the prediction
+  mechanism, and the loss. The central difference is that B0 learns a single mapping from the observed history
+  to all future displacements, while TrAISformer learns a next-token distribution and repeatedly feeds its own
+  prediction back in.
+
+• The main difference is not the original CT-DMA data. Both models start from the same normalized trajectory
+  values:
+
+  [LAT, LON, SOG, COG]
+
+  The difference is what the models are trained to predict.
+
+  - B0 predicts the complete future trajectory as one output.
+  - TrAISformer predicts the next trajectory point, feeds that prediction back in, and repeats.
+
+  ## 1. Different training objectives
+
+  ### B0: direct trajectory regression
+
+  B0 learns:
+
+  observed 18 points  ->  72 future points
+
+  Its input is:
+
+  context: [batch, 18, 4]
+
+  Its target is:
+
+  target: [batch, 72, 2]
+
+  where the two target channels are future latitude and longitude.
+
+  DirectForecastDataset explicitly constructs these context and target arrays in [forecasting/data.py](/home/
+  schestakov/projects/maritim/forecasting/data.py:67).
+
+  The model output head has size:
+
+  output_steps * 2
+
+  With the current configuration:
+
+  72 * 2 = 144 values
+
+  In [models/direct/model.py](/home/schestakov/projects/maritim/models/direct/model.py:159), those values are
+  reshaped into:
+
+  [batch, 1, 72, 2]
+
+  So one forward pass produces the entire 72-step trajectory.
+
+  Conceptually:
+
+  history
+     |
+     v
+  Transformer encoder
+     |
+     v
+  one hidden vector
+     |
+     v
+  MLP outputs 72 displacement vectors
+     |
+     v
+  integrate displacements
+     |
+     v
+  72 future positions
+
+  The future points are integrated cumulatively, but the model does not call itself 72 times. It predicts all
+  72 movement increments in parallel.
+
+  ### TrAISformer: autoregressive next-point prediction
+
+  TrAISformer learns:
+
+  previous trajectory points -> next trajectory point
+
+  During training, it receives a sequence and shifts it by one position:
+
+  inputs:  point_0, point_1, point_2, ..., point_119
+  targets: point_1, point_2, point_3, ..., point_120
+
+  This is implemented in [models/baselines/traisformer.py](/home/schestakov/projects/maritim/models/baselines/
+  traisformer.py:272).
+
+  The model predicts the next point at every sequence position. During training, the true previous point is
+  supplied each time. This is teacher forcing.
+
+  During inference, the process is:
+
+  1. Give the model the 18 observed points.
+  2. Predict point 19.
+  3. Append the predicted point.
+  4. Predict point 20 using the expanded sequence.
+  5. Repeat for 72 future steps.
+
+  The loop is in [models/baselines/traisformer.py](/home/schestakov/projects/maritim/models/baselines/
+  traisformer.py:289).
+
+  The important consequence is that TrAISformer uses its own previous predictions as future inputs. B0 never
+  feeds predicted future points back into its encoder.
+
+  ## 2. Why the Dataset preparation is different
+
+  The datasets are different because the models need different kinds of supervision.
+
+  ### B0 needs separate future targets
+
+  B0 does not need a long sequence containing the future. It only needs:
+
+  input: 18 observed points
+  target: 72 future coordinates
+
+  Therefore, the direct preparation does this:
+
+  target = row[input_steps : input_steps + output_steps]
+  context = row[:input_steps]
+
+  That happens in prepare_forecast_frame():
+
+  [forecasting/data.py](/home/schestakov/projects/maritim/forecasting/data.py:24)
+
+  B0’s training dataset then returns:
+
+  (
+      context,       # [18, 4]
+      targets,       # [72, 2]
+      mask,
+      vessel_id,
+      trajectory_id
+  )
+
+  The adapter sends the first three tensors into the model/loss:
+
+  [forecasting/adapters.py](/home/schestakov/projects/maritim/forecasting/adapters.py:276)
+
+  The loss is a masked Smooth L1 regression loss over the future trajectory:
+
+  [models/direct/losses.py](/home/schestakov/projects/maritim/models/direct/losses.py:7)
+
+  ### TrAISformer needs a sequence containing future points
+
+  For TrAISformer training, the future points are not separated into a [72, 2] target array. They remain part
+  of one longer sequence.
+
+  With the current configuration:
+
+  max_seqlen: 120
+  training_sequence_len: 121
+
+  The training dataset keeps up to 121 points:
+
+  point 0 through point 120
+
+  Then the model shifts that sequence internally:
+
+  input sequence:  points 0..119
+  target sequence: points 1..120
+
+  This is why TrAISformer training uses AutoregressiveTrajectoryDataset directly on the raw canonical rows:
+
+  [forecasting/adapters.py](/home/schestakov/projects/maritim/forecasting/adapters.py:356)
+
+  It does not need prepare_forecast_frame() to create a separate future target for its training loss.
+
+  It does use prepare_forecast_frame() later for validation/evaluation so that its predictions can be compared
+  against the same targets as B0.
+
+  ## 3. The input data at the model boundary
+
+  At evaluation time, both models ultimately start with the same shape:
+
+  [batch, 18, 4]
+
+  The four channels are:
+
+  normalized LAT
+  normalized LON
+  normalized SOG
+  normalized COG
+
+  The difference occurs after that.
+
+  ### B0 representation
+
+  B0 converts the four channels into nine continuous features:
+
+  global x position
+  global y position
+  position delta x
+  position delta y
+  eastward velocity
+  northward velocity
+  SOG
+  sin(COG)
+  cos(COG)
+
+  This conversion is in [models/direct/features.py](/home/schestakov/projects/maritim/models/direct/
+  features.py:24).
+
+  The tensor becomes:
+
+  [batch, 18, 9]
+
+  It is then projected into a 128-dimensional Transformer representation.
+
+  ### TrAISformer representation
+
+  TrAISformer keeps the four channels but converts each continuous value into a bin index:
+
+  [models/baselines/traisformer.py](/home/schestakov/projects/maritim/models/baselines/traisformer.py:160)
+
+  indices = (values * self.att_sizes).long()
+
+  The current bin counts are:
+
+  latitude:  250 bins
+  longitude: 270 bins
+  SOG:        30 bins
+  COG:        72 bins
+
+  For example:
+
+  lat_index = int(normalized_latitude * 250)
+
+  It then uses separate embedding tables for the four variables:
+
+  lat_emb
+  lon_emb
+  sog_emb
+  cog_emb
+
+  So the TrAISformer representation is categorical after binning, while B0 remains continuous.
+
+  This is not a separate grid file or raster dataset. The binning happens inside the TrAISformer model.
+
+  ## 4. The Transformer architectures are also different
+
+  They are both Transformers, but they are not the same Transformer.
+
+   Component                B0                                      TrAISformer
+  ━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Transformer type         PyTorch TransformerEncoder              Custom GPT-like causal Transformer
+  ───────────────────────  ──────────────────────────────────────  ────────────────────────────────────
+   Attention                Full attention over observed history    Causal attention
+  ───────────────────────  ──────────────────────────────────────  ────────────────────────────────────
+   Input representation     Continuous engineered features          Categorical embeddings
+  ───────────────────────  ──────────────────────────────────────  ────────────────────────────────────
+   Layers                   3                                       8
+  ───────────────────────  ──────────────────────────────────────  ────────────────────────────────────
+   Attention heads          4                                       8
+  ───────────────────────  ──────────────────────────────────────  ────────────────────────────────────
+   Hidden/embedding size    128                                     768
+  ───────────────────────  ──────────────────────────────────────  ────────────────────────────────────
+   Output                   72 future coordinate pairs              Categorical logits for next point
+  ───────────────────────  ──────────────────────────────────────  ────────────────────────────────────
+   Inference                One forward pass                        One forward pass per future step
+  ───────────────────────  ──────────────────────────────────────  ────────────────────────────────────
+   Prediction               Deterministic                           Stochastic, normally 16 rollouts
+
+  ### B0 uses an encoder
+
+  B0’s encoder is defined in [models/direct/encoders.py](/home/schestakov/projects/maritim/models/direct/
+  encoders.py:7).
+
+  It reads all 18 observed points and produces one vector from the final encoded position. Because the entire
+  history is already observed, it does not need causal masking between those 18 points.
+
+  That vector goes to a trajectory MLP, which emits all 72 future displacement steps.
+
+  ### TrAISformer uses a causal decoder-style Transformer
+
+  TrAISformer explicitly creates a lower-triangular causal mask:
+
+  [models/baselines/traisformer.py](/home/schestakov/projects/maritim/models/baselines/traisformer.py:37)
+
+  That means the prediction for time t can only attend to points at times 0..t.
+
+  Its output at each position is:
+
+  250 latitude logits
+  270 longitude logits
+  30 SOG logits
+  72 COG logits
+
+  These are split into four categorical distributions in [models/baselines/traisformer.py](/home/schestakov/
+  projects/maritim/models/baselines/traisformer.py:188).
+
+  ## 5. The losses are different
+
+  ### B0 loss
+
+  B0 predicts coordinates directly. Its loss compares predicted and true future positions:
+
+  predicted trajectory vs. true trajectory
+
+  The coordinates are converted to physical scale before calculating the loss, so errors are interpreted in
+  geographic distance rather than merely normalized-coordinate units.
+
+  The loss is masked so padded future points do not contribute.
+
+  ### TrAISformer loss
+
+  TrAISformer predicts bins, not continuous coordinates directly.
+
+  Its loss is cross-entropy:
+
+  predicted latitude bin vs. true latitude bin
+  predicted longitude bin vs. true longitude bin
+  predicted SOG bin vs. true SOG bin
+  predicted COG bin vs. true COG bin
+
+  The true continuous values are converted into bin indices before the loss is calculated.
+
+  At inference, sampled bin indices are converted back to continuous normalized values using bin centers:
+
+  (index + 0.5) / number_of_bins
+
+  ## 6. Why these choices matter
+
+  B0 is effectively learning:
+
+  f(history) = complete future path
+
+  Advantages:
+
+  - one model call predicts the whole horizon;
+  - no autoregressive error accumulation;
+  - continuous coordinate regression;
+  - deterministic output;
+  - direct trajectory-level loss.
+
+  TrAISformer is learning:
+
+  p(next_point | all_previous_points)
+
+  Advantages:
+
+  - naturally models sequential behavior;
+  - produces a probability distribution over possible next points;
+  - can generate multiple stochastic future routes;
+  - uses the same autoregressive formulation during rollout as during sequence modeling.
+
+  Costs:
+
+  - 72 sequential prediction steps;
+  - predictions can drift because generated points become future inputs;
+  - quantization limits spatial precision;
+  - errors can accumulate;
+  - training and inference differ because training uses true previous points while inference uses predicted
+    previous points.
+
+  ## 7. The complete comparison
+
+  B0:
+
+  Parquet row
+     -> first 18 points
+     -> continuous [LAT,LON,SOG,COG]
+     -> 9 continuous features
+     -> Transformer encoder
+     -> one hidden state
+     -> MLP outputs 72 displacement vectors
+     -> cumulative integration
+     -> 72 future LAT/LON points
+
+  TrAISformer:
+
+  Parquet row
+     -> first 18 points
+     -> continuous [LAT,LON,SOG,COG]
+     -> convert values to categorical bins
+     -> embeddings
+     -> causal Transformer
+     -> predict next-point bin distribution
+     -> sample one point
+     -> append it to sequence
+     -> repeat 72 times
+
+  B3A is essentially B0’s direct architecture plus one additional seven-dimensional historical-vessel context
+  vector. Its future prediction mechanism remains the same as B0’s: the complete future is emitted in one
+  forward pass.

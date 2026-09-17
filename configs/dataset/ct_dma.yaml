@@ -1,0 +1,21 @@
+name: ct_dma
+targets_are_normalized: true
+cadence_seconds: 300
+lat_min: 55.5
+lat_max: 58.0
+lon_min: 10.3
+lon_max: 13.0
+sog_min: 0.0
+sog_max: 30.0
+cog_min: 0.0
+cog_max: 360.0
+
+# The reference pipeline currently reads the three named parquet files below.
+# This path describes those artifacts honestly; it is not the raw-Danish path.
+preprocessed_folder: /home/schestakov/projects/paper_implementations/TrAISformer/data/ct_dma
+train_file: train.parquet
+valid_file: valid.parquet
+test_file: test.parquet
+source_train_file: ct_dma_train.pkl
+source_valid_file: ct_dma_valid.pkl
+source_test_file: ct_dma_test.pkl

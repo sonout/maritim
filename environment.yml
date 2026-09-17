@@ -1,0 +1,18 @@
+name: maritim
+
+# Minimal runtime environment for training and evaluation.
+# Python 3.9 is not supported by the type annotations used by the models.
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.10
+  - "numpy>=1.26,<2"
+  - "pandas>=2.2,<3"
+  - "pyarrow>=16,<25"
+  - "pyyaml>=6,<7"
+  - pip
+  - pip:
+      # Replace this with the platform-specific PyTorch install if a different
+      # CUDA build is required on the machine running the experiments.
+      - "torch>=2.0,<3"

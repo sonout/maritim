@@ -1,0 +1,30 @@
+name: dk
+targets_are_normalized: false
+cadence_seconds: 600
+lat_min: 55.5
+lat_max: 58
+lon_min: 10.3
+lon_max: 13
+ship_types: ['Tanker', 'Cargo']
+nav_stat: ['Moored', 'At anchor']
+sog_min: 0.1
+sog_max: 30
+cog_min: 0
+cog_max: 360
+raw_data_folder: /data/shared/schestakov/data/maritim/danish/raw
+preprocessed_folder: /data/shared/schestakov/data/maritim/danish/preprocessed
+batch_size: 32
+interval_max: 7200 # 7200 seconds = 2h , 3600 seconds = 1h
+min_length: 10
+min_duration: 7200 # 14400 = 4h, 7200 = 2h
+max_duration: 345600 # 96 hours (we do this as those ships are often just Floaters in the sea)
+resolution: 600
+# Train, Val, Test
+train_start: 2019-01-01
+train_end: 2019-03-10
+val_start: 2019-03-11
+val_end: 2019-03-20
+test_start: 2019-03-21
+test_end: 2019-03-31
+
+
