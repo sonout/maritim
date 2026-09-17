@@ -30,6 +30,10 @@ Thumbs.db
 *.swo
 *~
 
+# Downloaded reference paper (IEEE article 10380549)
+# Source: https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=10380549
+_docs/traisformer-10380549-arxiv-v4.pdf
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
