@@ -10,9 +10,8 @@ sog_max: 30.0
 cog_min: 0.0
 cog_max: 360.0
 
-# The reference pipeline currently reads the three named parquet files below.
-# This path describes those artifacts honestly; it is not the raw-Danish path.
-preprocessed_folder: /home/schestakov/projects/paper_implementations/TrAISformer/data/ct_dma
+# Paths are relative to the repository root; see the README's Data section.
+preprocessed_folder: data/ct_dma
 train_file: train.parquet
 valid_file: valid.parquet
 test_file: test.parquet

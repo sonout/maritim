@@ -1,0 +1,11 @@
+# Tested with Python 3.10.20 on Linux; CPU PyTorch.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.11.0+cpu
+numpy==1.26.4
+pandas==2.3.3
+pyarrow==24.0.0
+PyYAML==6.0.3
+pytest==9.0.2
+ruff==0.15.0
+matplotlib==3.10.8

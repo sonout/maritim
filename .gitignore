@@ -1,5 +1,9 @@
 # Local data and experiment outputs
 datasets/
+data/
+docs/private/
+.venv-public/
+.aws/
 lightning_logs/
 training_tb_logs/
 condor/
@@ -15,6 +19,9 @@ runs/
 *.h5
 *.hdf5
 *.safetensors
+*.parquet
+*.csv
+*.zip
 *.prof
 
 # Local tooling and editor state

@@ -1,3 +1,8 @@
+# Contains code adapted from GeoTrackNet, Copyright (c) 2018 Duong Nguyen.
+# See the combined LICENSE file for the GeoTrackNet MIT notice and terms.
+# Local changes include spatial outlier scaling, circular interpolation, and
+# fixed-grid geodesic resampling.
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
